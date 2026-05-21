@@ -150,23 +150,49 @@ def cargar_datos(horas):
                 tiempos.append(record.get_time())
                 valores.append(record.get_value())
         if not tiempos:
-            return pd.Series([], dtype=float, name=campo)
+            return pd.Series(
+                [],
+                dtype=float,
+                name=campo,
+                index=pd.DatetimeIndex([])
+            )
         idx = pd.DatetimeIndex(
             pd.to_datetime(pd.Series(tiempos), utc=True)
         ).tz_convert('America/Bogota')
         return pd.Series(valores, index=idx, name=campo, dtype=float).sort_index()
 
     client_db = InfluxDBClient(url=URL, token=TOKEN, org=ORG, verify_ssl=False)
+
     series = {c: consultar_campo(client_db, c) for c in CAMPOS}
+    
     df = pd.concat(series.values(), axis=1)
     df.columns = CAMPOS
-    df = df.resample('1min').mean().dropna()
+    
+    if df.empty:
+        return pd.DataFrame()
+    
+    df.index = pd.to_datetime(df.index, errors='coerce')
+    df = df[~df.index.isna()]
+    
+    if len(df.index) == 0:
+        return pd.DataFrame()
+    
+    df = df.sort_index()
+    
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.DatetimeIndex(df.index)
+    
+    df = df.resample('1min').mean()
+    
     df.index.name = 'tiempo'
+    
     return df
 
 with st.spinner('Conectando a InfluxDB y cargando datos...'):
     df = cargar_datos(horas)
-
+if df.empty:
+    st.error("❌ No hay datos disponibles")
+    st.stop()
 st.success(f'✅ {len(df)} registros · {df.index[0].strftime("%d/%m %H:%M")} → {df.index[-1].strftime("%d/%m %H:%M")} (hora Colombia)')
 
 # ─── Métricas ────────────────────────────────────────────────
